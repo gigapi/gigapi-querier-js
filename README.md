@@ -2,9 +2,7 @@
 
 # <img src="https://bun.sh/logo.svg" height=28> GigAPI Query Engine
 
-## Overview
-
-GigAPI provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
+GigAPI Bun provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
 
 ## Quick Start
 
@@ -66,3 +64,11 @@ Content-Type: application/json
 - File paths in metadata.json may contain absolute paths; the system handles both absolute and relative paths
 - Time fields are converted from nanosecond BigInt to ISO strings
 - Add `?debug=true` to query requests for detailed troubleshooting information
+
+-----
+
+## License
+
+<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/AGPLv3_Logo.svg/2560px-AGPLv3_Logo.svg.png" width=200>
+
+> Gigapipe is released under the GNU Affero General Public License v3.0 ©️ HEPVEST BV, All Rights Reserves.
