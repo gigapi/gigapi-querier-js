@@ -589,7 +589,12 @@ class QueryClient {
         const restOfQuery = originalParts[1].replace(tablePattern, '').trim();
         
         if (restOfQuery) {
-          duckdbQuery = `${originalParts[0]} ${fromPart} ${restOfQuery}`;
+          // Fix timestamp format - ensure timestamps are properly quoted
+          // Match time/date pattern: YYYY-MM-DDThh:mm:ss.fffZ without quotes
+          const timestampRegex = /([^'"])((?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?))/g;
+          const processedRestOfQuery = restOfQuery.replace(timestampRegex, "$1'$2'");
+          
+          duckdbQuery = `${originalParts[0]} ${fromPart} ${processedRestOfQuery}`;
         } else {
           duckdbQuery = `${originalParts[0]} ${fromPart}`;
         }
@@ -599,7 +604,11 @@ class QueryClient {
         
         // Add WHERE conditions if available
         if (parsed.whereConditions && parsed.whereConditions.trim() !== '') {
-          duckdbQuery += ` WHERE ${parsed.whereConditions}`;
+          // Fix timestamp format in WHERE clause
+          const timestampRegex = /([^'"])((?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?))/g;
+          const processedWhereConditions = parsed.whereConditions.replace(timestampRegex, "$1'$2'");
+          
+          duckdbQuery += ` WHERE ${processedWhereConditions}`;
         }
         
         // Add GROUP BY, HAVING, ORDER BY, and LIMIT
@@ -622,12 +631,17 @@ class QueryClient {
       
       console.log('Executing DuckDB query:', duckdbQuery);
       
-      // Execute the query
-      const result = this.connection.query(duckdbQuery);
-      console.log(`Query returned ${result.length} rows`);
-      
-      // Post-process the results to format timestamps properly if needed
-      return this._postProcessResults(result);
+      try {
+        // Execute the query
+        const result = this.connection.query(duckdbQuery);
+        console.log(`Query returned ${result.length} rows`);
+        
+        // Return the results directly without post-processing
+        return result;
+      } catch (error) {
+        console.error('DuckDB query execution error:', error);
+        throw new Error(`DuckDB query execution failed: ${error.message}`);
+      }
     } catch (error) {
       console.error('Query error:', error);
       throw error;
@@ -677,6 +691,36 @@ class QueryClient {
   }
   
   /**
+   * Safe JSON serialization that handles BigInt values
+   * @private
+   */
+  _safeStringify(obj) {
+    if (!obj || typeof obj !== 'object') {
+      return JSON.stringify(obj);
+    }
+    
+    // Create a safe copy with BigInt converted to strings
+    const safeCopy = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (typeof value === 'bigint') {
+        safeCopy[key] = value.toString();
+      } else if (value instanceof Date) {
+        safeCopy[key] = value.toISOString();
+      } else if (Array.isArray(value)) {
+        safeCopy[key] = value.map(item => 
+          typeof item === 'bigint' ? item.toString() : item
+        );
+      } else if (value !== null && typeof value === 'object') {
+        safeCopy[key] = this._safeStringify(value);
+      } else {
+        safeCopy[key] = value;
+      }
+    }
+    
+    return JSON.stringify(safeCopy);
+  }
+
+  /**
    * Post-process query results to handle timestamps and other transformations
    * @private
    */
@@ -685,28 +729,58 @@ class QueryClient {
       return results;
     }
     
+    // Log sample of results for debugging
+    console.log(`Post-processing ${results.length} results`);
+    if (results.length > 0) {
+      try {
+        console.log(`Sample result: ${this._safeStringify(results[0])}`);
+      } catch (error) {
+        console.error('Error logging sample result:', error);
+      }
+    }
+    
     // Check if there's a timestamp/time column that needs processing
     return results.map(row => {
-      const newRow = { ...row };
-      
-      // If there's a 'time' column that looks like a timestamp, format it properly
-      if (newRow.timestamp && typeof newRow.timestamp === 'object' && newRow.timestamp instanceof Date) {
-        // Keep the Date object but add an ISO string representation
-        newRow.timestamp_iso = newRow.timestamp.toISOString();
-      }
-      
-      if (newRow.time && typeof newRow.time === 'bigint') {
-        // If time is stored as nanoseconds, convert to a readable format
-        try {
-          // Assuming time is in nanoseconds since Unix epoch
-          const timeMs = Number(newRow.time / 1000000n); // Convert to milliseconds
-          newRow.time_iso = new Date(timeMs).toISOString();
-        } catch (e) {
-          console.error('Error converting time value:', e);
+      try {
+        const newRow = { ...row };
+        
+        // If there's a 'time' column that looks like a timestamp, format it properly
+        if (newRow.timestamp && typeof newRow.timestamp === 'object' && newRow.timestamp instanceof Date) {
+          // Keep the Date object but add an ISO string representation
+          newRow.timestamp_iso = newRow.timestamp.toISOString();
         }
+        
+        if (newRow.time && typeof newRow.time === 'bigint') {
+          // If time is stored as nanoseconds, convert to a readable format
+          try {
+            // Assuming time is in nanoseconds since Unix epoch
+            const timeMs = Number(newRow.time / 1000000n); // Convert to milliseconds
+            newRow.time_iso = new Date(timeMs).toISOString();
+          } catch (e) {
+            console.error('Error converting time value:', e);
+          }
+        }
+        
+        // Check for __timestamp field that might be a BigInt
+        if (newRow.__timestamp && typeof newRow.__timestamp === 'bigint') {
+          try {
+            const timestampMs = Number(newRow.__timestamp / 1000000n); // Convert to milliseconds
+            newRow.__timestamp_iso = new Date(timestampMs).toISOString();
+          } catch (e) {
+            console.error('Error converting __timestamp value:', e);
+          }
+        }
+        
+        // Check for NULL values in numeric columns with comparison conditions
+        if (newRow.temperature !== undefined && newRow.temperature === null) {
+          console.log("Found NULL temperature value in results");
+        }
+        
+        return newRow;
+      } catch (error) {
+        console.error('Error processing row:', error);
+        return row; // Return original row if processing fails
       }
-      
-      return newRow;
     });
   }
 
