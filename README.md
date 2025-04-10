@@ -1,10 +1,11 @@
 ![image](https://github.com/user-attachments/assets/fa3788a2-9a5b-47bf-b6ef-f818ba62a404)
 
-# GigAPI Query Engine in Bun
+# <img src="https://bun.sh/logo.svg" height=28> GigAPI Query Engine
 
 ## Overview
 
-GigAPI provides a SQL interface to query time-series data stored in GigAPI's parquet storage with intelligent file resolution based on metadata and time ranges. 
+GigAPI provides a SQL interface to query time-series stored in GigAPI's parquet storage leveraging catalog metadata. 
+
 ## Quick Start
 
 ```bash
