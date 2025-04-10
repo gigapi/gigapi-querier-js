@@ -12,9 +12,12 @@ bun install
 
 # Start the server
 bun start
-
-# Default: http://localhost:8080 (configurable via PORT env var)
 ```
+
+### Configuration
+
+- `PORT`: Server port (default: 8080)
+- `DATA_DIR`: Path to data directory (default: ./data)
 
 ## API Endpoints
 
@@ -31,7 +34,7 @@ Content-Type: application/json
 
 ### Debug Endpoints
 
-- `GET /debug/mydb/weather`: Inspect metadata and file structure
+- `GET /debug/{db}/{table}`: Inspect metadata and file structure
 - `GET /fs/{path}`: Browse files and directories
 - `POST /sql`: Execute raw DuckDB queries
 
@@ -54,10 +57,6 @@ Content-Type: application/json
 3. Use DuckDB to execute optimized queries against selected files
 4. Post-process results to handle BigInt timestamps
 
-## Configuration
-
-- `PORT`: Server port (default: 8080)
-- `DATA_DIR`: Path to data directory (default: ./data)
 
 ## Notes for Developers
 
