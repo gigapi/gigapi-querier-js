@@ -33,8 +33,6 @@ function processBigIntInResults(results) {
       // Convert BigInt to string
       if (typeof value === 'bigint') {
         newRow[key] = value.toString();
-      } else if (value instanceof Date) {
-        newRow[key] = value.toISOString();
       } else if (Array.isArray(value)) {
         newRow[key] = processBigIntInResults(value);
       } else if (typeof value === 'object' && value !== null) {
@@ -57,8 +55,6 @@ function processBigIntInObject(obj) {
   for (const [key, value] of Object.entries(obj)) {
     if (typeof value === 'bigint') {
       newObj[key] = value.toString();
-    } else if (value instanceof Date) {
-      newObj[key] = value.toISOString();
     } else if (Array.isArray(value)) {
       newObj[key] = processBigIntInResults(value);
     } else if (typeof value === 'object' && value !== null) {
@@ -89,58 +85,43 @@ app.post('/query', async (c) => {
     
     console.log(`Executing query for database '${dbName}':`, params.query);
     
-    // Enable debug mode if requested
-    const debug = c.req.query('debug') === 'true' || params.debug === true;
-    
     try {
       const result = await queryClient.query(params.query, dbName);
       
-      // If no results but debug mode is on, return parsed query and other info
-      if (result.length === 0 && debug) {
-        // Re-parse the query to get the parsed information
-        const parsed = queryClient.parseQuery(params.query, dbName);
-        
-        return c.json({
-          results: [],
-          debug: {
-            parsed: processBigIntInObject(parsed),
-            message: "No results found. The query was parsed successfully, but no matching data was found.",
-            possibleIssues: [
-              "Time range doesn't match any available data",
-              "Measurement name might be incorrect",
-              "WHERE conditions might be too restrictive",
-              "Database name might be incorrect"
-            ]
+      // For aggregate queries, ensure counts aren't null
+      const processedResults = result.map(row => {
+        const fixedRow = {};
+        for (const [key, value] of Object.entries(row)) {
+          if (key.includes('count') && value === null) {
+            // Always use 0 for null counts
+            fixedRow[key] = 0;
+          } else if (typeof value === 'bigint') {
+            // Convert BigInt to string for JSON compatibility
+            fixedRow[key] = value.toString();
+          } else if (value !== null && typeof value === 'object' && Object.keys(value).includes('0') && !Array.isArray(value)) {
+            // Check if this is a string-like object (with numeric keys and a 'ptr' property)
+            if ('ptr' in value) {
+              // Convert to an actual string
+              let str = '';
+              let i = 0;
+              while (value[i.toString()] !== undefined) {
+                str += value[i.toString()];
+                i++;
+              }
+              fixedRow[key] = str;
+            } else {
+              fixedRow[key] = value;
+            }
+          } else {
+            fixedRow[key] = value;
           }
-        });
-      }
-      
-      // Process results to convert BigInt to strings before JSON serialization
-      const processedResults = processBigIntInResults(result);
+        }
+        return fixedRow;
+      });
       
       return c.json({ results: processedResults });
     } catch (error) {
       console.error('Query execution error:', error);
-      
-      // Enhanced error response with more context
-      if (debug) {
-        try {
-          const parsed = queryClient.parseQuery(params.query, dbName);
-          return c.json({ 
-            error: error.message,
-            debug: {
-              parsed: processBigIntInObject(parsed),
-              stack: error.stack
-            }
-          }, 500);
-        } catch (parseError) {
-          return c.json({ 
-            error: error.message,
-            parseError: parseError.message
-          }, 500);
-        }
-      }
-      
       return c.json({ error: error.message }, 500);
     }
   } catch (error) {
@@ -393,3 +374,6 @@ queryClient.initialize().then(() => {
   console.error('Failed to initialize QueryClient:', error);
   process.exit(1);
 });
+
+
+export { processBigIntInResults, processBigIntInObject };
