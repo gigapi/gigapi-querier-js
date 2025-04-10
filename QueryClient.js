@@ -30,6 +30,11 @@ class QueryClient {
    * @returns {Object} - Parsed query components
    */
   parseQuery(sql, dbName) {
+    // Normalize whitespace and line breaks
+    sql = sql.replace(/\s+/g, ' ').trim();
+    
+    console.log("Normalized SQL:", sql);
+    
     // Extract SELECT columns
     const selectMatch = sql.match(/SELECT\s+(.*?)\s+FROM/i);
     const columns = selectMatch ? selectMatch[1].trim() : '*';
@@ -44,11 +49,28 @@ class QueryClient {
     const queryDbName = fromMatch[1] || dbName;
     const measurement = fromMatch[2];
 
-    // Extract time range
-    let timeRange = this._extractTimeRange(sql);
+    // Simple extraction of WHERE clause
+    let whereConditions = "";
+    const whereParts = sql.split(/\s+WHERE\s+/i);
+    
+    if (whereParts.length >= 2) {
+      whereConditions = whereParts[1];
+      
+      // Remove other clauses if they exist
+      const endClauseKeywords = [" GROUP BY ", " ORDER BY ", " LIMIT ", " HAVING "];
+      
+      for (const keyword of endClauseKeywords) {
+        const keywordIndex = whereConditions.toUpperCase().indexOf(keyword);
+        if (keywordIndex !== -1) {
+          whereConditions = whereConditions.substring(0, keywordIndex);
+        }
+      }
+    }
+    
+    console.log("Extracted WHERE conditions:", whereConditions);
 
-    // Extract additional WHERE conditions excluding time
-    const whereConditions = this._extractWhereConditions(sql, timeRange.timeCondition);
+    // Extract time range
+    let timeRange = { start: null, end: null, timeCondition: null };
 
     // Extract other clauses
     const orderBy = sql.match(/ORDER\s+BY\s+(.*?)(?:\s+(?:LIMIT|GROUP|HAVING|$))/i)?.[1] || '';
@@ -56,6 +78,17 @@ class QueryClient {
     const having = sql.match(/HAVING\s+(.*?)(?:\s+(?:ORDER|LIMIT|$))/i)?.[1] || '';
     const limitMatch = sql.match(/LIMIT\s+(\d+)/i);
     const limit = limitMatch ? parseInt(limitMatch[1]) : null;
+
+    console.log('Parsed SQL components:', {
+      columns,
+      dbName: queryDbName,
+      measurement,
+      whereConditions,
+      orderBy, 
+      groupBy,
+      having,
+      limit
+    });
 
     return {
       columns,
@@ -74,7 +107,13 @@ class QueryClient {
    * Extract time range from SQL query
    * @private
    */
-  _extractTimeRange(sql) {
+  _extractTimeRange(sql, whereClause = '') {
+    // If no WHERE clause was provided, try to extract it from the SQL
+    if (!whereClause) {
+      const whereMatch = sql.match(/\bWHERE\s+(.*?)(?:\s+(?:GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|$))/i);
+      whereClause = whereMatch ? whereMatch[1].trim() : '';
+    }
+    
     // Common time patterns in InfluxQL/SQL
     const timePatterns = [
       // time >= '2023-01-01T00:00:00'
@@ -93,7 +132,7 @@ class QueryClient {
     let userSpecifiedTimeCondition = false;
 
     // Check for BETWEEN pattern first
-    const betweenMatch = sql.match(timePatterns[3]);
+    const betweenMatch = whereClause.match(timePatterns[3]);
     if (betweenMatch) {
       start = new Date(betweenMatch[1]).getTime() * 1000000; // Convert to nanoseconds
       end = new Date(betweenMatch[2]).getTime() * 1000000;
@@ -101,7 +140,7 @@ class QueryClient {
       userSpecifiedTimeCondition = true;
     } else {
       // Check for >= or > pattern
-      const startMatch = sql.match(timePatterns[0]);
+      const startMatch = whereClause.match(timePatterns[0]);
       if (startMatch) {
         start = new Date(startMatch[2]).getTime() * 1000000;
         timeCondition = `time ${startMatch[1]} '${startMatch[2]}'`;
@@ -109,7 +148,7 @@ class QueryClient {
       }
 
       // Check for <= or < pattern
-      const endMatch = sql.match(timePatterns[1]);
+      const endMatch = whereClause.match(timePatterns[1]);
       if (endMatch) {
         end = new Date(endMatch[2]).getTime() * 1000000;
         // If we already have a time condition, we need to combine them
@@ -122,7 +161,7 @@ class QueryClient {
       }
 
       // Check for = pattern
-      const equalMatch = sql.match(timePatterns[2]);
+      const equalMatch = whereClause.match(timePatterns[2]);
       if (equalMatch) {
         const exactTime = new Date(equalMatch[1]).getTime() * 1000000;
         start = exactTime;
@@ -151,12 +190,11 @@ class QueryClient {
    * Extract WHERE conditions excluding time
    * @private
    */
-  _extractWhereConditions(sql, timeCondition) {
-    const whereMatch = sql.match(/WHERE\s+(.*?)(?:\s+(?:GROUP|ORDER|LIMIT|$))/i);
-    if (!whereMatch) return '';
+  _extractWhereConditions(whereClause, timeCondition) {
+    if (!whereClause) return '';
 
-    // Remove time conditions from WHERE clause
-    let conditions = whereMatch[1];
+    let conditions = whereClause;
+    console.log('Processing WHERE clause:', conditions);
     
     // Remove the time condition if it exists
     if (timeCondition) {
@@ -171,6 +209,7 @@ class QueryClient {
     // Clean up leftover AND/OR operators
     conditions = conditions.replace(/^\s*(AND|OR)\s+/i, '').replace(/\s+(AND|OR)\s*$/i, '').trim();
     
+    console.log('Extracted non-time WHERE conditions:', conditions);
     return conditions;
   }
 
@@ -538,46 +577,54 @@ class QueryClient {
 
       console.log(`Found ${files.length} relevant files`);
       
-      // Construct the DuckDB query
-      let duckdbQuery = `
-        SELECT ${parsed.columns}
-        FROM read_parquet([${files.map(f => `'${f}'`).join(', ')}], union_by_name = true)
-      `;
+      // Construct the DuckDB query using the original SQL structure
+      // but replacing the FROM clause with our parquet files
+      const originalParts = sql.split(/\s+FROM\s+/i);
+      const fromPart = `FROM read_parquet([${files.map(f => `'${f}'`).join(', ')}], union_by_name = true)`;
       
-      // Add WHERE conditions
-      const whereConditions = [];
-      if (parsed.timeRange.timeCondition) {
-        whereConditions.push(parsed.timeRange.timeCondition);
-      }
-      if (parsed.whereConditions) {
-        whereConditions.push(parsed.whereConditions);
-      }
-      
-      if (whereConditions.length > 0 && whereConditions.some(cond => cond && cond.trim() !== '')) {
-        duckdbQuery += ` WHERE ${whereConditions.filter(cond => cond && cond.trim() !== '').join(' AND ')}`;
-      }
-      
-      // Add GROUP BY, HAVING, ORDER BY, and LIMIT
-      if (parsed.groupBy && parsed.groupBy.trim() !== '') {
-        duckdbQuery += ` GROUP BY ${parsed.groupBy}`;
-      }
-      
-      if (parsed.having && parsed.having.trim() !== '') {
-        duckdbQuery += ` HAVING ${parsed.having}`;
-      }
-      
-      if (parsed.orderBy && parsed.orderBy.trim() !== '') {
-        duckdbQuery += ` ORDER BY ${parsed.orderBy}`;
-      }
-      
-      if (parsed.limit !== null) {
-        duckdbQuery += ` LIMIT ${parsed.limit}`;
+      let duckdbQuery;
+      if (originalParts.length >= 2) {
+        // Extract the table name pattern to replace
+        const tablePattern = new RegExp(`(?:${parsed.dbName}\\.)?${parsed.measurement}\\b`, 'i');
+        const restOfQuery = originalParts[1].replace(tablePattern, '').trim();
+        
+        if (restOfQuery) {
+          duckdbQuery = `${originalParts[0]} ${fromPart} ${restOfQuery}`;
+        } else {
+          duckdbQuery = `${originalParts[0]} ${fromPart}`;
+        }
+      } else {
+        // Fallback to basic query
+        duckdbQuery = `SELECT ${parsed.columns} ${fromPart}`;
+        
+        // Add WHERE conditions if available
+        if (parsed.whereConditions && parsed.whereConditions.trim() !== '') {
+          duckdbQuery += ` WHERE ${parsed.whereConditions}`;
+        }
+        
+        // Add GROUP BY, HAVING, ORDER BY, and LIMIT
+        if (parsed.groupBy && parsed.groupBy.trim() !== '') {
+          duckdbQuery += ` GROUP BY ${parsed.groupBy}`;
+        }
+        
+        if (parsed.having && parsed.having.trim() !== '') {
+          duckdbQuery += ` HAVING ${parsed.having}`;
+        }
+        
+        if (parsed.orderBy && parsed.orderBy.trim() !== '') {
+          duckdbQuery += ` ORDER BY ${parsed.orderBy}`;
+        }
+        
+        if (parsed.limit !== null) {
+          duckdbQuery += ` LIMIT ${parsed.limit}`;
+        }
       }
       
       console.log('Executing DuckDB query:', duckdbQuery);
       
       // Execute the query
       const result = this.connection.query(duckdbQuery);
+      console.log(`Query returned ${result.length} rows`);
       
       // Post-process the results to format timestamps properly if needed
       return this._postProcessResults(result);
@@ -585,6 +632,48 @@ class QueryClient {
       console.error('Query error:', error);
       throw error;
     }
+  }
+  
+  /**
+   * Filter results to remove rows with NULL values that don't satisfy the condition
+   * @private
+   */
+  _filterNullsInResults(results, whereCondition) {
+    if (!results || !Array.isArray(results) || results.length === 0) {
+      return results;
+    }
+    
+    // Parse the condition to extract the column name and operator
+    // Example: "temperature > 99" => { column: "temperature", operator: ">", value: 99 }
+    const conditionMatch = whereCondition.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*(>=|<=|>|<|=|!=|<>)\s*([0-9.]+)/i);
+    if (!conditionMatch) {
+      return results;
+    }
+    
+    const column = conditionMatch[1];
+    const operator = conditionMatch[2];
+    const value = parseFloat(conditionMatch[3]);
+    
+    console.log(`Filtering nulls for condition: ${column} ${operator} ${value}`);
+    
+    return results.filter(row => {
+      // If the column value is null, it doesn't satisfy any comparison
+      if (row[column] === null || row[column] === undefined) {
+        return false;
+      }
+      
+      // Check the condition based on the operator
+      switch (operator) {
+        case '>': return row[column] > value;
+        case '>=': return row[column] >= value;
+        case '<': return row[column] < value;
+        case '<=': return row[column] <= value;
+        case '=': return row[column] === value;
+        case '!=':
+        case '<>': return row[column] !== value;
+        default: return true;
+      }
+    });
   }
   
   /**
