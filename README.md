@@ -4,7 +4,7 @@
 
 ## Overview
 
-GigAPI provides a SQL interface to query time-series stored in GigAPI's parquet storage leveraging catalog metadata. 
+GigAPI provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
 
 ## Quick Start
 
