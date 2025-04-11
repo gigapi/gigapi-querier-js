@@ -4,7 +4,7 @@
 
 GigAPI Bun provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
 
-## Quick Start
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Quick Start
 
 ```bash
 # Install dependencies
@@ -38,7 +38,7 @@ Content-Type: application/json
 - `GET /fs/{path}`: Browse files and directories
 - `POST /sql`: Execute raw DuckDB queries
 
-## Data Structure
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Data Structure
 
 ```
 /data
@@ -50,7 +50,7 @@ Content-Type: application/json
           metadata.json
 ```
 
-## Query Processing Logic
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Query Processing Logic
 
 1. Parse SQL query to extract measurement name and time range
 2. Find relevant parquet files using metadata
@@ -58,7 +58,7 @@ Content-Type: application/json
 4. Post-process results to handle BigInt timestamps
 
 
-## Notes for Developers
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Notes for Developers
 
 - File paths in metadata.json may contain absolute paths; the system handles both absolute and relative paths
 - Time fields are converted from nanosecond BigInt to ISO strings
